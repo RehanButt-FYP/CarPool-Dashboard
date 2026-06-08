@@ -28,7 +28,11 @@ class UserVerification {
       _hasUrl(vehicleDocBackUrl);
 
   bool get isPending => verificationStatus == 'pending';
-  bool get isApproved => verificationStatus == 'approved';
+  bool get isApproved {
+    final s = verificationStatus?.toLowerCase();
+    return s == 'approved' || s == 'verified';
+  }
+
   bool get isRejected => verificationStatus == 'rejected';
 
   static bool _hasUrl(String? v) => v != null && v.trim().isNotEmpty;
@@ -68,6 +72,8 @@ class UserDocument {
     this.createdAt,
     this.updatedAt,
     this.lastSeen,
+    this.carIds = const [],
+    this.isEnabled = true,
     this.verification,
   });
 
@@ -81,16 +87,53 @@ class UserDocument {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? lastSeen;
+  final List<String> carIds;
+  /// When false, admin has disabled this account (`isEnabled` on Firestore user doc).
+  final bool isEnabled;
   final UserVerification? verification;
 
   bool get hasPhoto => photoURL != null && photoURL!.trim().isNotEmpty;
 
   bool get hasSubmittedDocs => verification?.isComplete == true;
 
-  /// True when admin has approved this user as a driver.
+  /// Admin approved this user as a driver (`approved` or `verified` on verification).
   bool get isDriverApproved {
     final s = verification?.verificationStatus?.toLowerCase();
     return s == 'approved' || s == 'verified';
+  }
+
+  /// Uploaded vehicle registration doc (original admin “drivers” metric).
+  bool get hasVehicleVerificationDoc {
+    final vehicleFront = verification?.vehicleDocFrontUrl?.trim() ?? '';
+    return vehicleFront.isNotEmpty;
+  }
+
+  bool get hasRegisteredCar => carIds.isNotEmpty;
+
+  /// Has a car in the app and/or vehicle verification doc.
+  bool get isRegisteredDriver =>
+      hasVehicleVerificationDoc || hasRegisteredCar;
+
+  /// Show “Driver” tag in lists.
+  bool get isDriver => isRegisteredDriver || isDriverApproved;
+
+  /// Submitted all docs and still waiting for admin (not approved/rejected).
+  bool get isPendingAdminReview {
+    if (!hasSubmittedDocs) return false;
+    if (isDriverApproved) return false;
+    final s = verification?.verificationStatus?.toLowerCase();
+    return s != 'rejected';
+  }
+
+  /// Admin approved after document review.
+  bool get isAdminApprovedDriver =>
+      isDriverApproved && hasSubmittedDocs;
+
+  /// Opened the app within [window] (uses Firestore `lastSeen`).
+  bool wasActiveWithin(Duration window) {
+    final seen = lastSeen;
+    if (seen == null) return false;
+    return DateTime.now().difference(seen) <= window;
   }
 
   String get displayName {
@@ -103,8 +146,8 @@ class UserDocument {
   }
 
   String get verificationStatusLabel {
-    final s = verification?.verificationStatus;
-    if (s == 'approved') return 'Approved';
+    final s = verification?.verificationStatus?.toLowerCase();
+    if (s == 'approved' || s == 'verified') return 'Approved';
     if (s == 'rejected') return 'Rejected';
     if (verification?.isComplete == true) return 'Pending Review';
     return 'Not Submitted';
@@ -122,6 +165,12 @@ class UserDocument {
     if (verMap is Map<String, dynamic>) {
       verification = UserVerification.fromMap(verMap);
     }
+
+    final carIdsRaw = map['carIds'];
+    final carIds = carIdsRaw is List
+        ? carIdsRaw.map((e) => e.toString()).where((s) => s.isNotEmpty).toList()
+        : <String>[];
+
     return UserDocument(
       id: id,
       fullName: map['fullName']?.toString() ?? '',
@@ -133,6 +182,8 @@ class UserDocument {
       createdAt: _timestamp(map['createdAt']),
       updatedAt: _timestamp(map['updatedAt']),
       lastSeen: _timestamp(map['lastSeen']),
+      carIds: carIds,
+      isEnabled: map['isEnabled'] != false,
       verification: verification,
     );
   }
@@ -153,24 +204,37 @@ class UserDocument {
         'createdAt': createdAt?.millisecondsSinceEpoch,
         'updatedAt': updatedAt?.millisecondsSinceEpoch,
         'lastSeen': lastSeen?.millisecondsSinceEpoch,
+        'carIds': carIds,
+        'isEnabled': isEnabled,
         if (verification != null) 'verification': verification!.toMap(),
       };
 
   UserDocument copyWith({
     UserVerification? verification,
     DateTime? updatedAt,
+    DateTime? lastSeen,
+    List<String>? carIds,
+    bool? isEnabled,
+    String? fullName,
+    String? firstName,
+    String? lastName,
+    String? phoneNumber,
+    String? gender,
+    String? photoURL,
   }) {
     return UserDocument(
       id: id,
-      fullName: fullName,
-      firstName: firstName,
-      lastName: lastName,
-      phoneNumber: phoneNumber,
-      gender: gender,
-      photoURL: photoURL,
+      fullName: fullName ?? this.fullName,
+      firstName: firstName ?? this.firstName,
+      lastName: lastName ?? this.lastName,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
+      gender: gender ?? this.gender,
+      photoURL: photoURL ?? this.photoURL,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
-      lastSeen: lastSeen,
+      lastSeen: lastSeen ?? this.lastSeen,
+      carIds: carIds ?? this.carIds,
+      isEnabled: isEnabled ?? this.isEnabled,
       verification: verification ?? this.verification,
     );
   }

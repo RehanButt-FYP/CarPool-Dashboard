@@ -283,4 +283,103 @@ class AdminRidesService {
 
     await updateRide(rideId, data);
   }
+
+  /// Rides currently listed on Explore (upcoming, verified, not canceled).
+  Future<int> countActiveRidesNow({bool forceRefresh = false}) async {
+    if (forceRefresh) {
+      await syncRides(forceFullRefresh: true);
+    }
+
+    // Query Firestore directly so the count is not stale vs the local ride cache.
+    final snap = await _rides
+        .where('endTimestamp', isGreaterThan: _now)
+        .get();
+
+    return snap.docs
+        .map(RideDocument.fromFirestore)
+        .where((r) => r.isListedOnExplore)
+        .length;
+  }
+
+  /// Quick WhatsApp-sourced ride defaults.
+  static const defaultDriverName = 'Carpool user';
+  static const defaultCarName = 'Carpool';
+
+  /// Creates a ride (defaults suit WhatsApp admin entry).
+  Future<String> createRide({
+    required String from,
+    required String to,
+    required DateTime rideDate,
+    required String startTimeWall,
+    required String endTimeWall,
+    String otherStopsText = '',
+    String driverName = '',
+    String? driverId,
+    String? driverPhotoURL,
+    String carName = '',
+    String? carId,
+    int? carYear,
+    String rideFare = '',
+    int totalSeats = 4,
+    int? availableSeats,
+    String? notes,
+    String? whatsappPhone,
+    bool isEnable = true,
+    bool? isActive,
+    String driverVerificationStatus = RideDriverVerificationStatus.pending,
+  }) async {
+    final timestamps = RideFirestoreUtils.timestampsForDate(
+      rideDate,
+      startTimeWall,
+      endTimeWall,
+    );
+
+    final seats = totalSeats.clamp(1, 20);
+    final available = (availableSeats ?? seats).clamp(0, seats);
+
+    final data = <String, dynamic>{
+      'from': from.trim(),
+      'to': to.trim(),
+      'otherStops': RideFirestoreUtils.parseOtherStops(otherStopsText),
+      'driverName': driverName.trim().isEmpty ? defaultDriverName : driverName.trim(),
+      'carName': carName.trim().isEmpty ? defaultCarName : carName.trim(),
+      'totalSeats': seats,
+      'availableSeats': available,
+      'startTime': startTimeWall,
+      'endTime': endTimeWall,
+      'startTimestamp': timestamps.start,
+      'endTimestamp': timestamps.end,
+      'rideFare': rideFare.trim(),
+      'notes': notes?.trim() ?? '',
+      'whatsappPhone': whatsappPhone?.trim() ?? '',
+      'isEnable': isEnable,
+      'driverVerificationStatus': driverVerificationStatus,
+      'requests': <dynamic>[],
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    if (driverId != null && driverId.trim().isNotEmpty) {
+      data['driverId'] = driverId.trim();
+    }
+    if (driverPhotoURL != null && driverPhotoURL.trim().isNotEmpty) {
+      data['driverPhotoURL'] = driverPhotoURL.trim();
+    }
+    if (carId != null && carId.trim().isNotEmpty) {
+      data['carId'] = carId.trim();
+    }
+    if (carYear != null) {
+      data['carYear'] = carYear;
+    }
+    if (isActive != null) {
+      data['isActive'] = isActive;
+    }
+
+    final ref = await _rides.add(data);
+    final doc = await ref.get();
+    if (doc.exists) {
+      await _cache.mergeRides([RideDocument.fromFirestore(doc)]);
+    }
+    return ref.id;
+  }
 }

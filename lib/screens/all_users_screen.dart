@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/user_document.dart';
 import '../services/firestore_service.dart';
 import 'driver_detail_screen.dart';
+import 'user_detail_screen.dart';
 
 class AllUsersScreen extends StatefulWidget {
   const AllUsersScreen({super.key});
@@ -147,21 +148,32 @@ class _UserTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasVerification = user.hasSubmittedDocs;
-    final status = user.verification?.verificationStatus;
+    final status = user.verification?.verificationStatus?.toLowerCase();
 
-    Color? badgeColor;
-    String? badgeLabel;
-
-    if (status == 'approved') {
-      badgeColor = const Color(0xFF2E7D32);
-      badgeLabel = 'Driver';
+    final badges = <({String label, Color color})>[];
+    if (user.isRegisteredDriver || user.isDriverApproved) {
+      badges.add((label: 'Driver', color: const Color(0xFF6D4C41)));
+    }
+    if (user.isDriverApproved) {
+      badges.add((label: 'Approved', color: const Color(0xFF2E7D32)));
     } else if (hasVerification && status == 'pending') {
-      badgeColor = const Color(0xFFE65100);
-      badgeLabel = 'Pending';
+      badges.add((label: 'Pending', color: const Color(0xFFE65100)));
+    }
+    if (!user.isEnabled) {
+      badges.add((label: 'Disabled', color: Colors.red[700]!));
     }
 
     return GestureDetector(
-      onTap: hasVerification
+      onTap: () {
+        if (user.id == null) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => UserDetailScreen(userId: user.id!),
+          ),
+        );
+      },
+      onLongPress: hasVerification
           ? () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -195,29 +207,32 @@ class _UserTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           user.displayName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
+                            color: user.isEnabled
+                                ? Colors.grey[900]
+                                : Colors.grey[500],
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (badgeLabel != null) ...[
-                        const SizedBox(width: 6),
+                      for (final badge in badges) ...[
+                        const SizedBox(width: 4),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                              horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(
-                            color: badgeColor!.withValues(alpha: 0.12),
+                            color: badge.color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            badgeLabel,
+                            badge.label,
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: badgeColor,
+                              color: badge.color,
                             ),
                           ),
                         ),
@@ -238,7 +253,7 @@ class _UserTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (hasVerification)
+            if (user.id != null)
               Icon(Icons.chevron_right, color: Colors.grey[400], size: 18),
           ],
         ),

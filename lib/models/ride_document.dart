@@ -16,9 +16,9 @@ abstract final class RideDriverVerificationStatus {
     if (raw != null && raw.isNotEmpty) {
       return isVerified(raw) ? verified : pending;
     }
-    // Legacy boolean `isVerified` before this field existed.
-    if (map['isVerified'] == true) return verified;
-    return pending;
+    // Legacy boolean + carpool default when field is omitted.
+    if (map['isVerified'] == false) return pending;
+    return verified;
   }
 }
 
@@ -94,6 +94,23 @@ class RideDocument {
     final end = endTimestamp;
     if (end == null) return true;
     return end.isAfter(DateTime.now());
+  }
+
+  /// Ride is in progress right now (aligned with carpool ride card green indicator).
+  bool get isActiveNow {
+    if (isCanceled || !isEnable) return false;
+    final start = startTimestamp;
+    final end = endTimestamp;
+    if (start == null || end == null) return false;
+    final now = DateTime.now();
+    return !now.isBefore(start) && !now.isAfter(end);
+  }
+
+  /// Listed on Explore — same rules as carpool Explore tab (excluding own-ride filter).
+  bool get isListedOnExplore {
+    if (isCanceled) return false;
+    if (!isRideVerified) return false;
+    return isUpcomingOrInProgress;
   }
 
   DateTime? get rideDate {

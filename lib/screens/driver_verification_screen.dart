@@ -141,7 +141,7 @@ class _DriverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = user.verification?.verificationStatus ?? '';
+    final status = user.verification?.verificationStatus?.toLowerCase() ?? '';
     final submittedAt = user.updatedAt ?? user.createdAt;
 
     Color statusColor;
@@ -150,6 +150,7 @@ class _DriverCard extends StatelessWidget {
 
     switch (status) {
       case 'approved':
+      case 'verified':
         statusColor = const Color(0xFF2E7D32);
         statusIcon = Icons.check_circle_rounded;
         statusLabel = 'Approved';

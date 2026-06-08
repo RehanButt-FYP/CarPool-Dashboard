@@ -13,7 +13,8 @@ class DriverDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final ver = user.verification;
     final service = AdminFirestoreService();
-    final status = ver?.verificationStatus ?? '';
+    final status = ver?.verificationStatus?.toLowerCase() ?? '';
+    final isApproved = user.isDriverApproved;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
@@ -95,8 +96,8 @@ class DriverDetailScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 28),
-            if (status != 'approved' || status == 'rejected')
-              _buildActionButtons(context, service, status),
+            if (!isApproved && status != 'rejected')
+              _buildActionButtons(context, service, isApproved: isApproved),
             const SizedBox(height: 16),
           ],
         ),
@@ -197,6 +198,7 @@ class DriverDetailScreen extends StatelessWidget {
 
     switch (status) {
       case 'approved':
+      case 'verified':
         bg = const Color(0xFFE8F5E9);
         fg = const Color(0xFF2E7D32);
         icon = Icons.check_circle_rounded;
@@ -253,12 +255,12 @@ class DriverDetailScreen extends StatelessWidget {
 
   Widget _buildActionButtons(
     BuildContext context,
-    AdminFirestoreService service,
-    String status,
-  ) {
+    AdminFirestoreService service, {
+    required bool isApproved,
+  }) {
     return Row(
       children: [
-        if (status != 'approved')
+        if (!isApproved)
           Expanded(
             child: ElevatedButton.icon(
               onPressed: () => _confirmAction(
@@ -271,8 +273,11 @@ class DriverDetailScreen extends StatelessWidget {
                 onConfirm: () async {
                   await service.approveDriver(user.id!);
                   if (context.mounted) {
-                    _showSnackBar(context, 'Driver approved successfully!',
-                        isSuccess: true);
+                    _showSnackBar(
+                      context,
+                      'Driver approved — active rides marked Verified on Explore.',
+                      isSuccess: true,
+                    );
                     Navigator.pop(context);
                   }
                 },
@@ -289,7 +294,7 @@ class DriverDetailScreen extends StatelessWidget {
               ),
             ),
           ),
-        if (status != 'approved') const SizedBox(width: 12),
+        if (!isApproved) const SizedBox(width: 12),
         Expanded(
           child: OutlinedButton.icon(
             onPressed: () => _confirmAction(

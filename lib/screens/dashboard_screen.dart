@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/firestore_service.dart';
+import '../services/rides_service.dart';
 import '../widgets/stat_card.dart';
+import 'add_ride_screen.dart';
 import 'driver_verification_screen.dart';
 import 'all_users_screen.dart';
 import 'rides_screen.dart';
@@ -15,6 +17,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final _service = AdminFirestoreService();
+  final _ridesService = AdminRidesService();
   DashboardStats? _stats;
   bool _loading = true;
   String? _error;
@@ -31,21 +34,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _error = null;
     });
 
-    if (!forceRefresh) {
-      try {
-        final cached = await _service.getCachedDashboardStats();
-        if (cached != null && mounted) {
-          setState(() {
-            _stats = cached;
-            _loading = false;
-          });
-        }
-      } catch (_) {}
-    }
-
     try {
-      final stats = await _service.getDashboardStats(forceRefresh: forceRefresh);
-      if (mounted) setState(() => _stats = stats);
+      final stats = await _service.getDashboardStats();
+      final activeRides =
+          await _ridesService.countActiveRidesNow(forceRefresh: true);
+      if (mounted) {
+        setState(() => _stats = stats.copyWith(activeRidesNow: activeRides));
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -189,7 +184,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required bool isWeb,
     required bool isTablet,
   }) {
-    final crossAxisCount = isWeb ? 5 : (isTablet ? 3 : 2);
+    final crossAxisCount = isWeb ? 3 : (isTablet ? 3 : 2);
+
+    final activeUsersLine = stats.activeUsers24h == 0
+        ? 'No app opens in last 24h'
+        : '${stats.activeUsers24h} active in 24h'
+            '${stats.activeDrivers24h > 0 ? ' · ${stats.activeDrivers24h} with vehicle docs' : ''}';
+
+    final newDriversLine = stats.newUsersToday == 0
+        ? 'Registered today'
+        : stats.newDriversToday == 0
+            ? 'None are drivers yet'
+            : '${stats.newDriversToday} of ${stats.newUsersToday} are drivers';
 
     final cards = [
       StatCard(
@@ -197,7 +203,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         value: stats.totalUsers.toString(),
         icon: Icons.people_alt_rounded,
         color: const Color(0xFF1565C0),
-        subtitle: 'Registered accounts',
+        subtitle: activeUsersLine,
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const AllUsersScreen()),
@@ -208,21 +214,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
         value: stats.newUsersToday.toString(),
         icon: Icons.person_add_alt_1_rounded,
         color: const Color(0xFF00897B),
-        subtitle: 'Registered today',
+        subtitle: newDriversLine,
       ),
       StatCard(
-        title: 'Active Drivers',
-        value: stats.usersWithCars.toString(),
+        title: 'Drivers (Vehicle Docs)',
+        value: stats.driversWithVehicleDocs.toString(),
         icon: Icons.directions_car_rounded,
         color: const Color(0xFF6D4C41),
-        subtitle: 'Added vehicle docs',
+        subtitle: stats.registeredDrivers > stats.driversWithVehicleDocs
+            ? '${stats.registeredDrivers} total with cars or docs'
+            : 'Uploaded vehicle registration doc',
+      ),
+      StatCard(
+        title: 'Active Rides',
+        value: stats.activeRidesNow.toString(),
+        icon: Icons.local_taxi_rounded,
+        color: const Color(0xFF5E35B1),
+        subtitle: 'Listed on Explore (upcoming)',
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const RidesScreen(
+              initialFilter: RidesListFilter.all,
+            ),
+          ),
+        ),
       ),
       StatCard(
         title: 'Pending Review',
         value: stats.pendingVerifications.toString(),
         icon: Icons.pending_actions_rounded,
         color: const Color(0xFFE65100),
-        subtitle: 'Awaiting approval',
+        subtitle: 'Complete docs awaiting review',
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
@@ -235,7 +258,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         value: stats.approvedDrivers.toString(),
         icon: Icons.verified_rounded,
         color: const Color(0xFF2E7D32),
-        subtitle: 'Verified & active',
+        subtitle: 'Admin verified (docs reviewed)',
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
@@ -298,6 +321,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildQuickActions(BuildContext context, {required bool isWeb}) {
     final actions = [
+      _ActionData(
+        icon: Icons.add_road_rounded,
+        color: const Color(0xFF00897B),
+        title: 'Add Ride',
+        subtitle: 'Quick entry from WhatsApp — saved as unverified',
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AddRideScreen()),
+        ),
+      ),
       _ActionData(
         icon: Icons.route_rounded,
         color: const Color(0xFF5E35B1),

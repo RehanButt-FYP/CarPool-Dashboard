@@ -9,6 +9,7 @@ import '../models/user_document.dart';
 /// Persists user documents locally and tracks the last Firestore sync time.
 class UsersCacheRepository {
   static const _watermarkKey = 'users_sync_watermark_ms';
+  static const _lastFullSyncKey = 'users_last_full_sync_ms';
 
   Future<DateTime?> getSyncWatermark() async {
     final prefs = await SharedPreferences.getInstance();
@@ -25,6 +26,18 @@ class UsersCacheRepository {
   Future<void> clearSyncWatermark() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_watermarkKey);
+  }
+
+  Future<DateTime?> getLastFullSync() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ms = prefs.getInt(_lastFullSyncKey);
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  Future<void> setLastFullSync(DateTime value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_lastFullSyncKey, value.millisecondsSinceEpoch);
   }
 
   Future<List<UserDocument>> loadUsers() async {
@@ -74,6 +87,8 @@ class UsersCacheRepository {
   Future<void> clearAll() async {
     await clearUsers();
     await clearSyncWatermark();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_lastFullSyncKey);
   }
 
   Future<File> _cacheFile() async {
