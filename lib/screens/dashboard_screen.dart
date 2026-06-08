@@ -4,6 +4,7 @@ import '../services/firestore_service.dart';
 import '../widgets/stat_card.dart';
 import 'driver_verification_screen.dart';
 import 'all_users_screen.dart';
+import 'rides_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -24,13 +25,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadStats();
   }
 
-  Future<void> _loadStats() async {
+  Future<void> _loadStats({bool forceRefresh = false}) async {
     setState(() {
-      _loading = true;
+      _loading = _stats == null;
       _error = null;
     });
+
+    if (!forceRefresh) {
+      try {
+        final cached = await _service.getCachedDashboardStats();
+        if (cached != null && mounted) {
+          setState(() {
+            _stats = cached;
+            _loading = false;
+          });
+        }
+      } catch (_) {}
+    }
+
     try {
-      final stats = await _service.getDashboardStats();
+      final stats = await _service.getDashboardStats(forceRefresh: forceRefresh);
       if (mounted) setState(() => _stats = stats);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -69,14 +83,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: _loadStats,
+            onPressed: () => _loadStats(forceRefresh: true),
             icon: const Icon(Icons.refresh, color: Colors.white),
-            tooltip: 'Refresh',
+            tooltip: 'Full refresh from server',
           ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadStats,
+        onRefresh: () => _loadStats(forceRefresh: true),
         child: Center(
           child: ConstrainedBox(
             // Center & cap width on web for a proper dashboard feel
@@ -284,6 +298,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildQuickActions(BuildContext context, {required bool isWeb}) {
     final actions = [
+      _ActionData(
+        icon: Icons.route_rounded,
+        color: const Color(0xFF5E35B1),
+        title: 'Review Rides',
+        subtitle: 'Rides from unverified drivers — approve for Explore',
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const RidesScreen()),
+        ),
+      ),
       _ActionData(
         icon: Icons.pending_actions_rounded,
         color: const Color(0xFFE65100),

@@ -31,7 +31,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '138983938126',
     projectId: 'carpool-61334',
     storageBucket: 'carpool-61334.firebasestorage.app',
-    iosBundleId: 'com.carpoolingpk.carpool',
+    iosBundleId: 'com.carpoolingpk.carpool.dashboard',
   );
 
   static const FirebaseOptions web = FirebaseOptions(

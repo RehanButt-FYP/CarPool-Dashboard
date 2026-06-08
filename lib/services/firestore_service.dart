@@ -1,82 +1,159 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../models/user_document.dart';
+import 'users_cache_repository.dart';
 
 class AdminFirestoreService {
+  AdminFirestoreService({UsersCacheRepository? cache})
+      : _cache = cache ?? UsersCacheRepository();
+
   static final _db = FirebaseFirestore.instance;
   static final _users = _db.collection('users');
 
-  // ── Stats ──────────────────────────────────────────────────────────────
+  final UsersCacheRepository _cache;
+  Future<List<UserDocument>>? _syncInFlight;
 
-  /// Stream of the total user count.
-  Stream<int> totalUsersStream() {
-    return _users.snapshots().map((s) => s.size);
-  }
+  // ── Sync / cache ─────────────────────────────────────────────────────────
 
-  /// Number of users who registered today (createdAt >= start of today).
-  Future<int> newUsersToday() async {
+  /// Start of today in local time — data before this can stay in cache.
+  static DateTime _startOfToday() {
     final now = DateTime.now();
-    final startOfDay = DateTime(now.year, now.month, now.day);
-    final snap = await _users
-        .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-        .get();
-    return snap.size;
+    return DateTime(now.year, now.month, now.day);
   }
 
-  /// Users who have a car added (have submitted at least the vehicle doc).
-  Future<int> usersWithCars() async {
-    final snap = await _users
-        .where('verification.vehicleDocFrontUrl', isNotEqualTo: '')
-        .get();
-    return snap.docs
-        .where((d) {
-          final url = d.data()['verification']?['vehicleDocFrontUrl'];
-          return url != null && (url as String).trim().isNotEmpty;
-        })
-        .length;
+  /// When the watermark is before today, only fetch from start of today onward.
+  static DateTime _incrementalSince(DateTime? watermark) {
+    final startOfToday = _startOfToday();
+    if (watermark == null) return startOfToday;
+    if (watermark.isBefore(startOfToday)) return startOfToday;
+    return watermark;
   }
 
-  /// Users who submitted all 6 docs (pending review or any status).
-  Future<int> usersWithPendingDocs() async {
-    final snap = await _users
-        .where('verification.verificationStatus', isEqualTo: 'pending')
-        .get();
-    return snap.size;
+  /// Loads users from cache, then fetches only new/changed docs from Firestore.
+  Future<List<UserDocument>> syncUsers({bool forceFullRefresh = false}) {
+    if (forceFullRefresh) {
+      _syncInFlight = null;
+    }
+    return _syncInFlight ??= _doSync(forceFullRefresh: forceFullRefresh).whenComplete(
+      () => _syncInFlight = null,
+    );
   }
 
-  // ── User Lists ─────────────────────────────────────────────────────────
+  Future<List<UserDocument>> _doSync({required bool forceFullRefresh}) async {
+    if (forceFullRefresh) {
+      await _cache.clearAll();
+    }
 
-  /// Stream of all users, ordered by createdAt descending.
-  Stream<List<UserDocument>> allUsersStream() {
-    return _users
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((s) => s.docs.map(UserDocument.fromFirestore).toList());
+    final watermark = await _cache.getSyncWatermark();
+    final cached = await _cache.loadUsers();
+
+    if (watermark == null || cached.isEmpty) {
+      return _fullSync();
+    }
+
+    final since = _incrementalSince(watermark);
+    final results = await Future.wait([
+      _users
+          .where('updatedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(since))
+          .get(),
+      _users
+          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(since))
+          .get(),
+    ]);
+
+    final docsById = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+    for (final snap in results) {
+      for (final doc in snap.docs) {
+        docsById[doc.id] = doc;
+      }
+    }
+
+    if (docsById.isEmpty) {
+      await _cache.setSyncWatermark(DateTime.now());
+      return _sortedUsers(cached);
+    }
+
+    final updates =
+        docsById.values.map(UserDocument.fromFirestore).toList();
+    await _cache.mergeUsers(updates);
+    await _cache.setSyncWatermark(DateTime.now());
+    return _sortedUsers(await _cache.loadUsers());
   }
 
-  /// Stream of users who have submitted docs (status = pending).
-  Stream<List<UserDocument>> pendingVerificationStream() {
-    return _users
-        .where('verification.verificationStatus', isEqualTo: 'pending')
-        .orderBy('updatedAt', descending: true)
-        .snapshots()
-        .map((s) => s.docs.map(UserDocument.fromFirestore).toList());
+  Future<List<UserDocument>> _fullSync() async {
+    final snap = await _users.get();
+    final users = snap.docs.map(UserDocument.fromFirestore).toList();
+    await _cache.saveUsers(users);
+    await _cache.setSyncWatermark(DateTime.now());
+    return _sortedUsers(users);
   }
 
-  /// Stream of approved drivers.
-  Stream<List<UserDocument>> approvedDriversStream() {
-    return _users
-        .where('verification.verificationStatus', isEqualTo: 'approved')
-        .snapshots()
-        .map((s) => s.docs.map(UserDocument.fromFirestore).toList());
+  List<UserDocument> _sortedUsers(List<UserDocument> users) {
+    final copy = List<UserDocument>.from(users);
+    copy.sort((a, b) {
+      final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);
+    });
+    return copy;
   }
 
-  // ── Verification Actions ───────────────────────────────────────────────
+  Future<void> _refreshUserInCache(String userId) async {
+    final doc = await _users.doc(userId).get();
+    if (!doc.exists) return;
+    await _cache.mergeUsers([UserDocument.fromFirestore(doc)]);
+  }
+
+  // ── Streams (cache-first, then incremental sync) ───────────────────────
+
+  Stream<List<UserDocument>> allUsersStream({bool forceRefresh = false}) async* {
+    final cached = await _cache.loadUsers();
+    if (cached.isNotEmpty && !forceRefresh) {
+      yield _sortedUsers(cached);
+    }
+    yield await syncUsers(forceFullRefresh: forceRefresh);
+  }
+
+  Stream<List<UserDocument>> pendingVerificationStream({
+    bool forceRefresh = false,
+  }) async* {
+    await for (final users in allUsersStream(forceRefresh: forceRefresh)) {
+      final pending = users
+          .where(
+            (u) =>
+                u.verification?.verificationStatus == 'pending' &&
+                u.hasSubmittedDocs,
+          )
+          .toList();
+      pending.sort((a, b) {
+        final aTime = a.updatedAt ?? a.createdAt ?? DateTime(0);
+        final bTime = b.updatedAt ?? b.createdAt ?? DateTime(0);
+        return bTime.compareTo(aTime);
+      });
+      yield pending;
+    }
+  }
+
+  Stream<List<UserDocument>> approvedDriversStream({
+    bool forceRefresh = false,
+  }) async* {
+    await for (final users in allUsersStream(forceRefresh: forceRefresh)) {
+      yield users
+          .where((u) => u.verification?.verificationStatus == 'approved')
+          .toList();
+    }
+  }
+
+  // ── Verification Actions ─────────────────────────────────────────────────
 
   Future<void> approveDriver(String userId) async {
     await _users.doc(userId).update({
       'verification.verificationStatus': 'verified',
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    await _refreshUserInCache(userId);
   }
 
   Future<void> rejectDriver(String userId, {String? reason}) async {
@@ -84,6 +161,7 @@ class AdminFirestoreService {
       'verification.verificationStatus': 'rejected',
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    await _refreshUserInCache(userId);
   }
 
   Future<void> resetVerification(String userId) async {
@@ -91,35 +169,48 @@ class AdminFirestoreService {
       'verification.verificationStatus': 'pending',
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    await _refreshUserInCache(userId);
   }
 
-  // ── Stats snapshot (combined) ──────────────────────────────────────────
+  // ── Stats (derived from cache + incremental sync) ────────────────────────
 
-  Future<DashboardStats> getDashboardStats() async {
-    final results = await Future.wait([
-      _users.get(),
-      newUsersToday(),
-      usersWithPendingDocs(),
-    ]);
+  Future<DashboardStats?> getCachedDashboardStats() async {
+    final users = await _cache.loadUsers();
+    if (users.isEmpty) return null;
+    return _statsFromUsers(users);
+  }
 
-    final allSnap = results[0] as QuerySnapshot<Map<String, dynamic>>;
-    final today = results[1] as int;
-    final pending = results[2] as int;
+  Future<DashboardStats> getDashboardStats({bool forceRefresh = false}) async {
+    final users = await syncUsers(forceFullRefresh: forceRefresh);
+    return _statsFromUsers(users);
+  }
 
-    int withCars = 0;
-    int approved = 0;
-    for (final doc in allSnap.docs) {
-      final ver = doc.data()['verification'];
-      if (ver is Map<String, dynamic>) {
-        final vehicleFront = ver['vehicleDocFrontUrl']?.toString() ?? '';
-        if (vehicleFront.isNotEmpty) withCars++;
-        if (ver['verificationStatus'] == 'approved') approved++;
-      }
+  DashboardStats _statsFromUsers(List<UserDocument> users) {
+    final startOfDay = _startOfToday();
+
+    var newToday = 0;
+    var withCars = 0;
+    var pending = 0;
+    var approved = 0;
+
+    for (final user in users) {
+      final created = user.createdAt;
+      if (created != null && !created.isBefore(startOfDay)) newToday++;
+
+      final ver = user.verification;
+      if (ver == null) continue;
+
+      final vehicleFront = ver.vehicleDocFrontUrl?.trim() ?? '';
+      if (vehicleFront.isNotEmpty) withCars++;
+
+      final status = ver.verificationStatus;
+      if (status == 'pending' && ver.isComplete) pending++;
+      if (status == 'approved') approved++;
     }
 
     return DashboardStats(
-      totalUsers: allSnap.size,
-      newUsersToday: today,
+      totalUsers: users.length,
+      newUsersToday: newToday,
       usersWithCars: withCars,
       pendingVerifications: pending,
       approvedDrivers: approved,

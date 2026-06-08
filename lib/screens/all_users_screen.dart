@@ -15,6 +15,19 @@ class AllUsersScreen extends StatefulWidget {
 class _AllUsersScreenState extends State<AllUsersScreen> {
   final _service = AdminFirestoreService();
   String _searchQuery = '';
+  late Stream<List<UserDocument>> _usersStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _usersStream = _service.allUsersStream();
+  }
+
+  void _fullRefresh() {
+    setState(() {
+      _usersStream = _service.allUsersStream(forceRefresh: true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,13 +41,20 @@ class _AllUsersScreenState extends State<AllUsersScreen> {
           'All Users',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          IconButton(
+            onPressed: _fullRefresh,
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            tooltip: 'Full refresh from server',
+          ),
+        ],
       ),
       body: Column(
         children: [
           _buildSearchBar(),
           Expanded(
             child: StreamBuilder<List<UserDocument>>(
-              stream: _service.allUsersStream(),
+              stream: _usersStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
@@ -78,11 +98,15 @@ class _AllUsersScreenState extends State<AllUsersScreen> {
                   );
                 }
 
-                return ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) => _UserTile(user: filtered[i]),
+                return RefreshIndicator(
+                  onRefresh: () => _service.syncUsers(forceFullRefresh: true),
+                  child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) => _UserTile(user: filtered[i]),
+                  ),
                 );
               },
             ),

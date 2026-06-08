@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.carpool_dashboard"
+    namespace = "com.carpoolingpk.carpool.dashboard"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -21,7 +21,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.carpoolingpk.carpool"
+        applicationId = "com.carpoolingpk.carpool.dashboard"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

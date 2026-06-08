@@ -87,6 +87,12 @@ class UserDocument {
 
   bool get hasSubmittedDocs => verification?.isComplete == true;
 
+  /// True when admin has approved this user as a driver.
+  bool get isDriverApproved {
+    final s = verification?.verificationStatus?.toLowerCase();
+    return s == 'approved' || s == 'verified';
+  }
+
   String get displayName {
     final t = fullName.trim();
     if (t.isNotEmpty) return t;
@@ -106,6 +112,7 @@ class UserDocument {
 
   static DateTime? _timestamp(dynamic v) {
     if (v is Timestamp) return v.toDate();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
     return null;
   }
 
@@ -133,5 +140,38 @@ class UserDocument {
   factory UserDocument.fromFirestore(
       DocumentSnapshot<Map<String, dynamic>> doc) {
     return UserDocument.fromMap(doc.data() ?? {}, id: doc.id);
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'fullName': fullName,
+        'firstName': firstName,
+        'lastName': lastName,
+        'phoneNumber': phoneNumber,
+        'gender': gender,
+        'photoURL': photoURL,
+        'createdAt': createdAt?.millisecondsSinceEpoch,
+        'updatedAt': updatedAt?.millisecondsSinceEpoch,
+        'lastSeen': lastSeen?.millisecondsSinceEpoch,
+        if (verification != null) 'verification': verification!.toMap(),
+      };
+
+  UserDocument copyWith({
+    UserVerification? verification,
+    DateTime? updatedAt,
+  }) {
+    return UserDocument(
+      id: id,
+      fullName: fullName,
+      firstName: firstName,
+      lastName: lastName,
+      phoneNumber: phoneNumber,
+      gender: gender,
+      photoURL: photoURL,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      lastSeen: lastSeen,
+      verification: verification ?? this.verification,
+    );
   }
 }

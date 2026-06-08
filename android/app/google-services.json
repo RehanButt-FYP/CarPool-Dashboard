@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:138983938126:android:c8e67b9a7eec8caa684b1f",
         "android_client_info": {
-          "package_name": "com.carpoolingpk.carpool"
+          "package_name": "com.carpoolingpk.carpool.dashboard"
         }
       },
       "oauth_client": [],

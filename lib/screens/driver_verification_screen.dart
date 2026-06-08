@@ -5,20 +5,37 @@ import '../models/user_document.dart';
 import '../services/firestore_service.dart';
 import 'driver_detail_screen.dart';
 
-class DriverVerificationScreen extends StatelessWidget {
+class DriverVerificationScreen extends StatefulWidget {
   const DriverVerificationScreen({super.key, this.filter = 'pending'});
 
   /// 'pending' | 'approved' | 'all'
   final String filter;
 
   @override
-  Widget build(BuildContext context) {
-    final service = AdminFirestoreService();
+  State<DriverVerificationScreen> createState() =>
+      _DriverVerificationScreenState();
+}
 
-    final Stream<List<UserDocument>> stream = switch (filter) {
-      'approved' => service.approvedDriversStream(),
-      _ => service.pendingVerificationStream(),
+class _DriverVerificationScreenState extends State<DriverVerificationScreen> {
+  final _service = AdminFirestoreService();
+  late Stream<List<UserDocument>> _usersStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _reloadStream();
+  }
+
+  void _reloadStream({bool forceRefresh = false}) {
+    _usersStream = switch (widget.filter) {
+      'approved' => _service.approvedDriversStream(forceRefresh: forceRefresh),
+      _ => _service.pendingVerificationStream(forceRefresh: forceRefresh),
     };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filter = widget.filter;
 
     final title = switch (filter) {
       'approved' => 'Approved Drivers',
@@ -40,9 +57,16 @@ class DriverVerificationScreen extends StatelessWidget {
           title,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          IconButton(
+            onPressed: () => setState(() => _reloadStream(forceRefresh: true)),
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            tooltip: 'Full refresh from server',
+          ),
+        ],
       ),
       body: StreamBuilder<List<UserDocument>>(
-        stream: stream,
+        stream: _usersStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
@@ -93,13 +117,17 @@ class DriverVerificationScreen extends StatelessWidget {
             );
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: users.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              return _DriverCard(user: users[index]);
-            },
+          return RefreshIndicator(
+            onRefresh: () => _service.syncUsers(forceFullRefresh: true),
+            child: ListView.separated(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              itemCount: users.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                return _DriverCard(user: users[index]);
+              },
+            ),
           );
         },
       ),

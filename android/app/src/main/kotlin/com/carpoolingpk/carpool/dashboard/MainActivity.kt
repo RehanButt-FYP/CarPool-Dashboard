@@ -1,4 +1,4 @@
-package com.example.carpool_dashboard
+package com.carpoolingpk.carpool.dashboard
 
 import io.flutter.embedding.android.FlutterActivity
 
